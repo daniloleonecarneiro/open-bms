@@ -144,12 +144,13 @@ export class EmailReconcileSessionService {
     const get = (kind: string, status: string): number => Number(counts.find((c) => c.kind === kind && c.status === status)?.count ?? 0);
     const auto = {
       applied: get('auto', 'applied'),
+      skipped: get('auto', 'skipped'),
       failed: get('auto', 'failed'),
       conflict: get('auto', 'conflict'),
       pending: get('auto', 'pending'),
       total: 0,
     };
-    auto.total = auto.applied + auto.failed + auto.conflict + auto.pending;
+    auto.total = auto.applied + auto.skipped + auto.failed + auto.conflict + auto.pending;
     const ambiguous = {
       applied: get('ambiguous', 'applied'),
       skipped: get('ambiguous', 'skipped'),
@@ -168,7 +169,14 @@ export class EmailReconcileSessionService {
       alreadyClean: session.alreadyClean,
       noMatches: session.noMatchTotal,
       noMatchSample: session.noMatchSample,
-      auto: { total: auto.total, applied: auto.applied, failed: auto.failed, conflict: auto.conflict, pending: auto.pending },
+      auto: {
+        total: auto.total,
+        applied: auto.applied,
+        skipped: auto.skipped,
+        failed: auto.failed,
+        conflict: auto.conflict,
+        pending: auto.pending,
+      },
       ambiguous: {
         total: ambiguous.total,
         applied: ambiguous.applied,

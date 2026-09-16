@@ -129,8 +129,9 @@ export interface ReconcileSessionProgress {
   noMatchSample: Array<{ contactId: number; currentEmail: string }>;
   // Quantified progress the UI renders as bars/counters. `conflict` counts
   // items whose address is already taken by another contact — they await an
-  // operator decision, they are not lost.
-  auto: { total: number; applied: number; failed: number; conflict: number; pending: number };
+  // operator decision, they are not lost. An auto item is only `skipped` when
+  // the operator declines one of those conflicts in the review queue.
+  auto: { total: number; applied: number; skipped: number; failed: number; conflict: number; pending: number };
   ambiguous: { total: number; applied: number; skipped: number; pending: number; failed: number; conflict: number };
   createdAt: string;
   updatedAt: string;

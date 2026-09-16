@@ -416,6 +416,21 @@ describe('EmailReconcileSessionService', () => {
       expect(progress.auto).toMatchObject({ applied: 10, conflict: 2, failed: 0, pending: 3, total: 15 });
       expect(progress.ambiguous).toMatchObject({ conflict: 1, pending: 4, total: 5 });
     });
+
+    it('keeps a skipped auto conflict inside the auto totals', async () => {
+      itemsRepo.createQueryBuilder.mockReturnValue(
+        makeQB({
+          getRawMany: jest.fn().mockResolvedValue([
+            { kind: 'auto', status: 'pending', count: '3' },
+            { kind: 'auto', status: 'skipped', count: '1' },
+          ]),
+        }),
+      );
+
+      const progress = await service.getProgress('job-1');
+
+      expect(progress.auto).toMatchObject({ skipped: 1, pending: 3, conflict: 0, total: 4 });
+    });
   });
 
   describe('getAmbiguousPage', () => {
