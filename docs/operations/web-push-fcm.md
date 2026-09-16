@@ -28,7 +28,7 @@ Não há env var para essas credenciais: tudo vive na Super Admin UI e é persis
 
 Logue como super-admin, vá em **Integrações → FCM** e preencha os três campos. No campo de web config você pode colar o snippet inteiro que o console mostra — o parser aceita tanto JSON estrito quanto o formato `const firebaseConfig = { ... }`.
 
-> **Salve os três de uma vez.** A troca do `firebaseConfig` exige os seis campos obrigatórios para acontecer; a da chave VAPID não passa por essa checagem. Salvar a config sem o VAPID deixa o `firebaseConfig` já apontando para o projeto novo e a `vapidKey` ainda apontando para a do bundle. O `getToken` cunha contra esse par inconsistente e **não emite erro nenhum** — nada no código barra esse estado.
+> **Salve os três de uma vez.** A web config e a chave VAPID são campos separados no formulário, mas o `web-push.js` só troca o projeto quando os dois estão presentes — a web config com os seis campos obrigatórios e a VAPID preenchida. Se faltar um deles, nada é substituído e o arquivo continua servindo o projeto do bundle. O save devolve 200 do mesmo jeito, então confira pelo `curl` da seção [Verificar](#verificar).
 
 Ignore o botão **Testar conexão**: ele apenas faz `JSON.parse` no que você colou e devolve o `project_id`. Uma chave revogada, expirada ou de outro projeto passa verde. A primeira validação de verdade acontece quando o worker `send-push` tenta entregar.
 
@@ -51,7 +51,7 @@ Entregue os dois juntos, com o lugar exato de cada um. Metade da instalação em
 
 Antes de entregar, confira o `cookieDomain` do snippet. Ele é derivado do `default_domain` da conta, e precisa ser o domínio **do site do cliente** — se ali estiver o domínio da própria instalação do BMS, o cookie do tracker é gravado no domínio errado e a identificação do contato se perde. Para corrigir, ajuste o domínio padrão da conta e gere o snippet de novo.
 
-`default_domain` precisa ser uma **URL absoluta com esquema**, por exemplo `https://www.example.com` — não `www.example.com` nem `example.com`. Um domínio sem esquema é parseado como caminho relativo, o `cookieDomain` sai vazio e o cookie fica preso ao host que serviu a página (host-only), quebrando a identificação entre subdomínios.
+Cadastre o `default_domain` como **URL absoluta com esquema**, por exemplo `https://www.example.com`. Um valor sem esquema (`www.example.com`) ainda funciona: o snippet completa com `http://` antes de extrair o host, e o `cookieDomain` sai `.example.com` do mesmo jeito. Se mesmo assim o valor não for uma URL válida, o `cookieDomain` sai vazio e a API registra um warn com o id da conta; nesse caso o cookie fica preso ao host que serviu a página (host-only), e a identificação entre subdomínios se perde.
 
 ## Verificar
 
@@ -100,7 +100,9 @@ O `web-push-core.js` é um bundle vendorado do SDK do Firebase, com um projeto h
 
 Isso poderia parecer mais simples de resolver passando a config pelo snippet da página, mas não funciona. O construtor do `bmsPush` chama `initializeApp(this.firebaseConfig)` num field initializer, que roda antes da linha que aplica o override vindo do snippet. Qualquer valor passado por ali chega tarde demais, e o `getToken` continua cunhando contra o projeto do bundle. Substituir o literal é o único ponto que realmente muda o projeto — e de quebra mantém a config da plataforma fora do HTML que o cliente cola no site.
 
-A troca só acontece quando a config tem os seis campos obrigatórios: `apiKey`, `projectId`, `messagingSenderId`, `appId`, `authDomain` e `storageBucket`. Uma config parcial não substitui nada, de propósito: meia troca deixaria alguns campos apontando para o projeto antigo e outros para o novo, cunhando tokens mortos.
+A troca é tudo-ou-nada. Ela só acontece quando a config tem os seis campos obrigatórios (`apiKey`, `projectId`, `messagingSenderId`, `appId`, `authDomain` e `storageBucket`) **e** a chave VAPID está salva. Faltando qualquer um, nada é substituído, de propósito: meia troca deixaria alguns valores apontando para o projeto antigo e outros para o novo, e o `getToken` cunharia tokens que nunca entregam, sem erro nenhum.
+
+O `measurementId` é opcional. Quando vem na config, substitui o do bundle; quando não vem, o do bundle é removido, para que o analytics não continue indo para a propriedade do projeto antigo.
 
 ## Acesso super-admin em dev local
 
@@ -122,9 +124,9 @@ docker exec postgres psql -U postgres -d msgops \
 
 ## Problemas comuns
 
-**O `web-push.js` continua servindo o projeto do bundle.** A config está incompleta — faltou algum dos seis campos obrigatórios e a substituição inteira foi pulada. Confira o que foi colado no campo de web config.
+**O `web-push.js` continua servindo o projeto do bundle.** A configuração está incompleta e a substituição inteira foi pulada: faltou algum dos seis campos obrigatórios da web config ou a chave VAPID. Confira os dois campos e salve os três valores de novo.
 
-**O token é gerado, mas nenhuma notificação chega.** Provavelmente a chave VAPID não foi salva junto com a web config. Salve os três valores de novo.
+**O token é gerado, mas nenhuma notificação chega.** Confira se a web config, a chave VAPID e a service account são do mesmo projeto. O código garante que web config e VAPID sejam trocadas juntas, mas não que venham do mesmo `project_id`, e nada valida a service account antes do envio.
 
 **O save devolveu 200, mas o `bms-sw.js` no S3 não mudou.** Esperado quando `BMS_ASSETS_URL` não está configurado: a publicação é não-fatal e não afeta o retorno. Só importa se você usa o caminho legado.
 
