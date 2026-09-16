@@ -40,14 +40,28 @@ SITE=""
 ACCOUNT_ID=""
 PAGE=""
 
+USO="uso: $(basename "$0") <site-url> [--account <id>] [--page <url>]"
+
+# Without set -e, a failed `shift 2` leaves the option in $1 and the loop never
+# ends, so the value is validated before shifting.
+valor_da_opcao() {
+  if [[ $2 -lt 2 || -z "$3" || "$3" == -* ]]; then
+    echo "$1 exige um valor" >&2
+    echo "$USO" >&2
+    exit 2
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --account)
-      ACCOUNT_ID="${2:-}"
+      valor_da_opcao "$1" "$#" "${2:-}"
+      ACCOUNT_ID="$2"
       shift 2
       ;;
     --page)
-      PAGE="${2:-}"
+      valor_da_opcao "$1" "$#" "${2:-}"
+      PAGE="$2"
       shift 2
       ;;
     -h | --help)
@@ -65,7 +79,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$SITE" ]]; then
-  echo "uso: $(basename "$0") <site-url> [--account <id>] [--page <url>]" >&2
+  echo "$USO" >&2
   exit 2
 fi
 
@@ -73,7 +87,10 @@ SITE="${SITE%/}"
 SW_URL="$SITE/sw.js"
 FALHAS=0
 
-TMPD="$(mktemp -d)"
+if ! TMPD="$(mktemp -d)" || [[ -z "$TMPD" ]]; then
+  echo "não consegui criar um diretório temporário" >&2
+  exit 1
+fi
 trap 'rm -rf "$TMPD"' EXIT
 
 ok() { printf '  \033[32mok\033[0m    %s\n' "$1"; }
