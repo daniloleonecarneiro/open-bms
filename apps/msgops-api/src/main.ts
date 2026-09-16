@@ -68,8 +68,6 @@ async function bootstrap() {
       return qs.parse(str, { arrayLimit: 200 });
     });
 
-  app.getHttpAdapter().getInstance().set('query parser', 'extended');
-
   // The email-reconcile flow (/imports/:jobId/reconcile/*) receives whole CSV
   // exports embedded in the JSON body — 350k contacts easily exceed 20mb — so
   // these routes get their own higher limit instead of raising the global one,
