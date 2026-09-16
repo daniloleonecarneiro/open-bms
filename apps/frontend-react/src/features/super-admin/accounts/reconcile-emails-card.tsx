@@ -61,6 +61,41 @@ const NAME_SIGNAL_COLUMNS = ['name', 'first_name', 'last_name'];
 // mount two levels under the route component.
 const routeApi = getRouteApi('/_authenticated/_layout/super-admin/accounts/import-enterprise/$jobId');
 
+// Everything the backend review queue returns: ambiguous items still undecided
+// plus address conflicts from either pass. Auto conflicts are counted under
+// `auto`, so looking at `ambiguous.pending` alone hides them.
+function reviewPendingCount(progress: ReconcileSessionProgress): number {
+  return progress.ambiguous.pending + progress.ambiguous.conflict + progress.auto.conflict;
+}
+
+// Search box bound to a URL search param. The input keeps a local copy so typing
+// stays responsive and commits once typing settles, but the URL stays the source
+// of truth: when it changes from elsewhere (back/forward), the box follows it.
+function useUrlSearchInput(urlValue: string, commit: (value: string) => void) {
+  const [value, setValue] = useState(urlValue);
+  const lastCommitted = useRef(urlValue);
+
+  useEffect(() => {
+    if (urlValue === lastCommitted.current) return;
+    lastCommitted.current = urlValue;
+    setValue(urlValue);
+  }, [urlValue]);
+
+  useEffect(() => {
+    const next = value.trim();
+    // Committing an unchanged term would still reset the page offset.
+    if (next === lastCommitted.current) return;
+    const id = setTimeout(() => {
+      lastCommitted.current = next;
+      commit(next);
+    }, 400);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  return [value, setValue] as const;
+}
+
 function hasNameSignal(columns: string[]): boolean {
   return columns.includes('name') || (columns.includes('first_name') && columns.includes('last_name'));
 }
@@ -267,7 +302,7 @@ function SessionView({ jobId, progress }: { jobId: string; progress: ReconcileSe
       <SummaryGrid progress={progress} />
       <ItemsSection jobId={jobId} />
       <AutoSection jobId={jobId} progress={progress} onProgress={refresh} />
-      {progress.ambiguous.total > 0 && (
+      {(progress.ambiguous.total > 0 || progress.auto.skipped > 0 || reviewPendingCount(progress) > 0) && (
         <>
           <BulkSection jobId={jobId} progress={progress} onProgress={refresh} />
           <AmbiguousSection jobId={jobId} progress={progress} onProgress={refresh} />
@@ -316,7 +351,7 @@ function AutoSection({ jobId, progress, onProgress }: { jobId: string; progress:
   const { auto } = progress;
   // Conflicts are settled as far as the automatic pass goes — they count as
   // progress, not as work left to run.
-  const done = auto.applied + auto.failed + auto.conflict;
+  const done = auto.applied + auto.skipped + auto.failed + auto.conflict;
   const pct = auto.total === 0 ? 100 : Math.round((done / auto.total) * 100);
 
   const run = async () => {
@@ -421,7 +456,7 @@ function BulkSection({ jobId, progress, onProgress }: { jobId: string; progress:
   const [running, setRunning] = useState(false);
   const runningRef = useRef(false);
 
-  const pending = progress.ambiguous.pending;
+  const pending = reviewPendingCount(progress);
 
   const runBestName = async () => {
     runningRef.current = true;
@@ -485,7 +520,7 @@ function BulkSection({ jobId, progress, onProgress }: { jobId: string; progress:
             ))}
           </SelectContent>
         </Select>
-        <Button size="sm" variant="secondary" onClick={runBestName} disabled={running}>
+        <Button size="sm" variant="secondary" onClick={runBestName} disabled={running || progress.ambiguous.pending === 0}>
           {running
             ? t('superAdmin.accounts.import.reconcile.bulkBestNameRunning')
             : t('superAdmin.accounts.import.reconcile.bulkBestName')}
@@ -505,19 +540,9 @@ function AmbiguousSection({ jobId, progress, onProgress }: { jobId: string; prog
   const navigate = routeApi.useNavigate();
   // contactId → csvRowNumber|null (null = skip). Cleared on every save/page move.
   const [decisions, setDecisions] = useState<Record<number, number | null>>({});
-  // Local, un-debounced copy so the input feels responsive; ambQ (URL, and
-  // therefore the query key) only updates once typing settles.
-  const [search, setSearch] = useState(q);
+  const [search, setSearch] = useUrlSearchInput(q, (next) => void navigate({ search: (prev) => ({ ...prev, ambQ: next, ambOffset: 0 }) }));
 
   const setOffset = (next: number) => void navigate({ search: (prev) => ({ ...prev, ambOffset: next }) });
-
-  useEffect(() => {
-    const id = setTimeout(() => {
-      void navigate({ search: (prev) => ({ ...prev, ambQ: search.trim(), ambOffset: 0 }) });
-    }, 400);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
 
   const pageQuery = useQuery({
     queryKey: ['reconcile-ambiguous', jobId, offset, pageSize, q],
@@ -567,14 +592,15 @@ function AmbiguousSection({ jobId, progress, onProgress }: { jobId: string; prog
   }, [pageItems, decisions]);
 
   const { ambiguous } = progress;
-  if (ambiguous.pending === 0) {
+  const reviewPending = reviewPendingCount(progress);
+  if (reviewPending === 0) {
     return (
       <Alert>
         <AlertTitle>{t('superAdmin.accounts.import.reconcile.ambiguousTitle')}</AlertTitle>
         <AlertDescription>
           {t('superAdmin.accounts.import.reconcile.ambiguousAllDone', {
             applied: ambiguous.applied.toLocaleString(),
-            skipped: ambiguous.skipped.toLocaleString(),
+            skipped: (ambiguous.skipped + progress.auto.skipped).toLocaleString(),
           })}
         </AlertDescription>
       </Alert>
@@ -582,7 +608,7 @@ function AmbiguousSection({ jobId, progress, onProgress }: { jobId: string; prog
   }
 
   const decidedCount = Object.keys(decisions).length;
-  const totalPending = pageQuery.data?.totalPending ?? ambiguous.pending;
+  const totalPending = pageQuery.data?.totalPending ?? reviewPending;
   const items = pageQuery.data?.items ?? [];
 
   const onSave = () => {
@@ -599,8 +625,7 @@ function AmbiguousSection({ jobId, progress, onProgress }: { jobId: string; prog
         <h4 className="text-sm font-medium">{t('superAdmin.accounts.import.reconcile.ambiguousTitle')}</h4>
         <p className="text-muted-foreground text-sm">
           {t('superAdmin.accounts.import.reconcile.ambiguousPendingHeader', {
-            pending: ambiguous.pending.toLocaleString(),
-            total: ambiguous.total.toLocaleString(),
+            pending: reviewPending.toLocaleString(),
           })}
         </p>
       </div>
@@ -806,17 +831,7 @@ function ItemsSection({ jobId }: { jobId: string }) {
   const { t } = useTranslation();
   const { itemsQ: q, itemsKind: kind, itemsStatus: status, itemsOffset: offset } = routeApi.useSearch();
   const navigate = routeApi.useNavigate();
-  // Local, un-debounced copy so the input feels responsive; itemsQ (URL, and
-  // therefore the query key) only updates once typing settles.
-  const [search, setSearch] = useState(q);
-
-  useEffect(() => {
-    const id = setTimeout(() => {
-      void navigate({ search: (prev) => ({ ...prev, itemsQ: search.trim(), itemsOffset: 0 }) });
-    }, 400);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  const [search, setSearch] = useUrlSearchInput(q, (next) => void navigate({ search: (prev) => ({ ...prev, itemsQ: next, itemsOffset: 0 }) }));
 
   const setOffset = (next: number) => void navigate({ search: (prev) => ({ ...prev, itemsOffset: next }) });
 

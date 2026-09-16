@@ -37,7 +37,7 @@ export interface ReconcileSessionProgress {
   noMatchSample: Array<{ contactId: number; currentEmail: string }>;
   // `conflict` = the address is already taken by another contact; the item
   // waits for an operator decision instead of being counted as a failure.
-  auto: { total: number; applied: number; failed: number; conflict: number; pending: number };
+  auto: { total: number; applied: number; skipped: number; failed: number; conflict: number; pending: number };
   ambiguous: { total: number; applied: number; skipped: number; pending: number; failed: number; conflict: number };
   createdAt: string;
   updatedAt: string;
